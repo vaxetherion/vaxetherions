@@ -1,0 +1,20 @@
+{
+  "name": "vaxetherion-profile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub profile assets, automation, and E2E validation for @vaxetherion",
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/download-assets.js",
+    "assets:swap": "node scripts/download-assets.js --swap",
+    "assets:restore": "node scripts/download-assets.js --restore",
+    "test": "npm run assets && node scripts/validate-assets.js && npm run lint && playwright test",
+    "lint": "bash scripts/lint-workflows.sh",
+    "clean": "bash scripts/clean-and-compress.sh",
+    "sanitize": "bash scripts/git-sanitize.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.48.2",
+    "svgo": "^3.3.2"
+  }
+}
