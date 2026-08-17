@@ -1,0 +1,39 @@
+# .github/actions/notify/action.yml
+# Composite action: kirim pesan ke semua kanal notifikasi yang terkonfigurasi.
+# Mendeteksi otomatis kanal mana yang terisi dan mengirim ke SEMUA kanal:
+#   - Discord  : input `discord_webhook`  (secret DISCORD_WEBHOOK_URL)
+#   - Telegram : input `telegram_token` + `telegram_chat` (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+# Bila tidak ada kanal yang terisi, action selesai tanpa mengirim apa pun
+# (pemanggil diharapkan tetap mengontrol via kondisi `if`).
+
+name: Notify
+description: Kirim pesan ke semua kanal notifikasi yang terkonfigurasi (Discord dan/atau Telegram).
+
+inputs:
+  message:
+    description: Teks pesan (plain text — emoji dan URL didukung).
+    required: true
+  discord_webhook:
+    description: URL webhook Discord (secret DISCORD_WEBHOOK_URL). Kosongkan bila tidak dipakai.
+    required: false
+    default: ''
+  telegram_token:
+    description: Token bot Telegram (secret TELEGRAM_BOT_TOKEN). Kosongkan bila tidak dipakai.
+    required: false
+    default: ''
+  telegram_chat:
+    description: Chat id Telegram (secret TELEGRAM_CHAT_ID). Kosongkan bila tidak dipakai.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Kirim ke kanal terkonfigurasi
+      shell: bash
+      env:
+        NOTIFY_MESSAGE: ${{ inputs.message }}
+        NOTIFY_DISCORD_WEBHOOK: ${{ inputs.discord_webhook }}
+        NOTIFY_TELEGRAM_TOKEN: ${{ inputs.telegram_token }}
+        NOTIFY_TELEGRAM_CHAT: ${{ inputs.telegram_chat }}
+      run: node "${{ github.action_path }}/notify.mjs"

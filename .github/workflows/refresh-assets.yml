@@ -1,0 +1,306 @@
+# .github/workflows/refresh-assets.yml
+# Workflow mingguan: refresh aset GitSkins + validasi E2E + issue otomatis.
+#
+# Jadwal : setiap Senin 03:00 UTC, plus trigger manual (workflow_dispatch)
+#          dan validasi instan saat berkas scripts/manifest/workflow berubah.
+# Tugas  : 0) validasi integritas aset fallback lokal di repo (kosong/korup)
+#             → memicu issue otomatis, bukan hanya saat API GitSkins gagal
+#          1) unduh, sanitasi & optimasi aset fallback lokal (npm run assets)
+#          2) validasi E2E  (npm test)
+#          3) commit aset fallback yang berubah
+#          4) buka issue otomatis bila ada widget yang gagal dimuat
+#          5) tutup issue otomatis bila run berikutnya sukses
+#          6) kirim notifikasi eksternal (opsional): Discord dan/atau Telegram
+#             via .github/actions/notify (composite action)
+#          7) peringatan durasi: notifikasi bila run berlangsung > 10 menit
+#             (issue lama > 3 hari diingatkan oleh .github/workflows/remind-issue.yml)
+
+name: Refresh GitSkins Assets
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/refresh-assets.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: gitskins-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repositori
+        uses: actions/checkout@v4
+
+      - name: Validasi integritas aset fallback lokal (kosong/korup)
+        # Bila gagal, job masuk status failure() sehingga issue otomatis
+        # terbuka — menangkap kasus aset repo kosong/korup, bukan hanya
+        # endpoint API yang bermasalah.
+        id: validate_local_assets
+        run: node scripts/validate-assets.js
+
+      - name: Catat waktu mulai run (untuk peringatan durasi)
+        id: start_time
+        run: echo "run_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Pasang dependensi (npm ci)
+        run: npm ci
+
+      - name: Unduh, sanitasi & optimasi aset GitSkins
+        id: download_assets
+        run: npm run assets
+
+      - name: Validasi E2E (API + fallback lokal)
+        id: e2e_validate
+        run: npm test
+
+      - name: Commit aset fallback yang diperbarui (jika berubah)
+        id: commit_assets
+        run: |
+          if ! git diff --quiet -- assets/; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add assets/
+            git commit -m "chore(assets): refresh aset fallback GitSkins [skip ci]"
+            git push
+            echo "✅ Aset fallback diperbarui dan di-commit."
+          else
+            echo "ℹ️  Tidak ada perubahan pada aset fallback."
+          fi
+
+      - name: Buka issue otomatis jika validasi gagal
+        id: buka_issue
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          # Snapshot konteks step (outcome/conclusion) agar komentar diagnosa
+          # bisa menyebutkan step mana yang gagal tanpa perlu membuka log.
+          # Dikirim lewat env (bukan input github-script) agar lolos lint actionlint.
+          STEPS_JSON: ${{ toJson(steps) }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = '⚠️ Widget GitSkins gagal dimuat';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+            });
+            if (issues.some((issue) => issue.title === title)) {
+              core.setOutput('created', 'false');
+              console.log('ℹ️  Issue serupa sudah terbuka — dilewati (anti-duplikasi).');
+              return;
+            }
+            const issue = await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body: [
+                'Salah satu widget GitSkins gagal dimuat pada workflow terbaru.',
+                '',
+                `- Workflow : \`${context.workflow}\``,
+                `- Run ID   : ${context.runId}`,
+                `- Log      : ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+                '',
+                '**Langkah perbaikan:**',
+                '1. Buka log run di atas untuk melihat widget mana yang gagal.',
+                '2. Jalankan ulang workflow secara manual via tab *Actions* → *Run workflow*.',
+                '3. Jika endpoint/parameter berubah, perbarui `scripts/gitskins.manifest.js`.',
+                '4. Untuk memakai fallback lokal sekarang juga: `npm run assets:swap`.',
+                '',
+                '> ℹ️ Issue ini akan **ditutup otomatis** oleh workflow pada run berikutnya yang sukses. Lihat `docs/playbook-darurat.md` untuk panduan lengkap.'
+              ].join('\n'),
+            });
+            core.setOutput('created', 'true');
+            console.log('✅ Issue otomatis berhasil dibuat.');
+
+            // Label otomatis: buat label bila belum ada, lalu tempelkan ke issue.
+            async function ensureLabel(name, color) {
+              try {
+                await github.rest.repos.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.repos.createLabel({ owner, repo, name, color });
+                  console.log(`🏷️  Label "${name}" dibuat otomatis.`);
+                } else {
+                  throw error;
+                }
+              }
+            }
+            for (const [name, color] of [['bug', 'd73a4a'], ['automation', '5319e7']]) {
+              await ensureLabel(name, color);
+            }
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.data.number,
+              labels: ['bug', 'automation'],
+            });
+            console.log('🏷️  Label "bug" + "automation" ditambahkan ke issue.');
+
+            // Assign otomatis ke pemilik repo (vaxetherion). Dilembutkan
+            // dengan try/catch: issue sudah terlanjur dibuat, kegagalan assign
+            // tidak boleh menggagalkan seluruh step.
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: issue.data.number,
+                assignees: [owner],
+              });
+              console.log(`👤 Issue di-assign ke @${owner}.`);
+            } catch (error) {
+              console.log(`⚠️ Gagal assign issue ke @${owner}: ${error.message}`);
+            }
+
+            // Komentar ringkasan diagnosa awal: step mana yang gagal.
+            const failedSteps = Object.entries(JSON.parse(process.env.STEPS_JSON))
+              .filter(([, s]) => s.outcome === 'failure' || s.conclusion === 'failure')
+              .map(([name]) => `- \`${name}\``);
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issue.data.number,
+              body: [
+                '## 🔍 Ringkasan diagnosa awal (otomatis)',
+                '',
+                '**Step yang gagal pada run ini:**',
+                failedSteps.length > 0
+                  ? failedSteps.join('\n')
+                  : '- *(tidak terdeteksi — periksa log run pada body issue)*',
+                '',
+                '**Cara membaca:**',
+                '1. Buka log run pada body issue di atas, cari baris `✘` di step yang gagal untuk melihat aset/endpoint bermasalah.',
+                '2. Gangguan sesaat? Jalankan ulang workflow secara manual (*Actions* → *Run workflow*).',
+                '3. Endpoint berubah? Perbarui `scripts/gitskins.manifest.js`.',
+                '4. Darurat? Alihkan profil ke fallback lokal: `npm run assets:swap`.',
+              ].join('\n'),
+            });
+            console.log('📝 Komentar ringkasan diagnosa awal ditambahkan.');
+
+      - name: Kirim notifikasi (Discord / Telegram) — issue dibuat
+        # Terkirim bila issue benar-benar baru dibuat pada run ini, dan bila
+        # minimal satu kanal dikonfigurasi (Discord webhook, atau Telegram
+        # bot token + chat id). Step dilewati bila tidak ada kanal terisi.
+        if: failure() && steps.buka_issue.outputs.created == 'true' && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('🚨 Widget GitSkins gagal dimuat — issue otomatis dibuat · Log {0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Tutup issue otomatis jika run berikutnya sukses
+        id: tutup_issue
+        # Hanya berjalan bila seluruh langkah di atas sukses (success());
+        # pada run yang gagal, status ini otomatis false sehingga issue
+        # yang baru saja dibuka tidak langsung tertutup.
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = '⚠️ Widget GitSkins gagal dimuat';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+            });
+            const openIssues = issues.filter((issue) => issue.title === title);
+            core.setOutput('closed_count', String(openIssues.length));
+            if (openIssues.length === 0) {
+              console.log('ℹ️  Tidak ada issue terbuka dengan judul tersebut — tidak ada yang perlu ditutup.');
+              return;
+            }
+            for (const issue of openIssues) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: [
+                  '✅ **Run berikutnya sukses** — widget GitSkins berhasil dimuat kembali.',
+                  '',
+                  `- Workflow : \`${context.workflow}\``,
+                  `- Run ID   : ${context.runId}`,
+                  `- Log      : ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+                  '',
+                  'Issue ini ditutup otomatis oleh workflow. Terima kasih! 🙌'
+                ].join('\n'),
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
+            console.log(`✅ ${openIssues.length} issue ditutup otomatis.`);
+
+      - name: Kirim notifikasi (Discord / Telegram) — run pulih
+        # Hanya terkirim bila ada issue yang benar-benar ditutup pada run ini
+        # (artinya run sebelumnya gagal dan sekarang pulih), dan bila minimal
+        # satu kanal notifikasi dikonfigurasi.
+        if: success() && steps.tutup_issue.outputs.closed_count != '0' && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('✅ Widget GitSkins pulih — run berikutnya sukses · Issue ⚠️ Widget GitSkins gagal dimuat ditutup otomatis · Log {0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Hitung durasi run (wajib di akhir agar mengukur run utuh)
+        id: run_duration
+        if: always()
+        run: |
+          start="${{ steps.start_time.outputs.run_start }}"
+          if [ -z "$start" ]; then
+            echo "⚠️ Waktu mulai tidak tercatat — lewati perhitungan durasi."
+            exit 0
+          fi
+          now=$(date +%s)
+          echo "elapsed_seconds=$(( now - start ))" >> "$GITHUB_OUTPUT"
+          echo "elapsed_minutes=$(( (now - start) / 60 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Peringatan durasi run > 10 menit
+        # Berjalan pada run yang selesai (sukses ATAU gagal, bukan dibatalkan).
+        # Notifikasi hanya dikirim bila durasi sejak start_time melebihi 10 menit.
+        # fromJSON: bandingkan secara numerik (perbandingan string salah untuk >= 1000 detik).
+        if: (success() || failure()) && fromJSON(steps.run_duration.outputs.elapsed_seconds) >= 600 && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('⏱️ Run workflow berlangsung lebih dari 10 menit · Log {0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}

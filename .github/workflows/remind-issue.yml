@@ -1,0 +1,121 @@
+# .github/workflows/remind-issue.yml
+# Workflow harian: pengingat otomatis untuk issue "⚠️ Widget GitSkins gagal dimuat".
+#
+# Jadwal : setiap hari 06:00 UTC, plus trigger manual (workflow_dispatch).
+# Tugas  : 1) cari issue terbuka dengan judul tersebut
+#          2) bila umur issue > 3 hari, pasang komentar pengingat
+#             (diulang setiap 3 hari hingga issue ditutup — anti-spam via
+#             pemeriksaan komentar pengingat terakhir)
+#          3) kirim notifikasi eksternal (Discord/Telegram) via
+#             .github/actions/notify bila ada issue yang diingatkan
+#
+# Catatan: issue yang dibiarkan terbuka lama biasanya berarti fallback lokal
+#          belum dipakai — lihat docs/playbook-darurat.md.
+
+name: Remind Open GitSkins Issue
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gitskins-remind
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repositori (untuk composite action lokal)
+        uses: actions/checkout@v4
+
+      - name: Periksa & ingatkan issue yang sudah lama terbuka
+        id: remind_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = '⚠️ Widget GitSkins gagal dimuat';
+            const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+            });
+            const candidates = issues.filter(
+              (issue) => issue.title === title && !issue.pull_request,
+            );
+            if (candidates.length === 0) {
+              console.log('ℹ️  Tidak ada issue terbuka dengan judul tersebut — selesai.');
+              core.setOutput('reminded', '0');
+              return;
+            }
+
+            let reminded = 0;
+            for (const issue of candidates) {
+              const ageMs = Date.now() - Date.parse(issue.created_at);
+              const days = Math.floor(ageMs / 86400000);
+              if (ageMs < THREE_DAYS_MS) {
+                console.log(`⏳ Issue #${issue.number} baru berumur ${days} hari — belum perlu diingatkan.`);
+                continue;
+              }
+
+              // Anti-spam: lewati bila pengingat terakhir kurang dari 3 hari lalu.
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: issue.number,
+                per_page: 100,
+              });
+              const lastReminder = comments
+                .filter((c) => (c.body ?? '').includes('⏰ Pengingat otomatis'))
+                .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+              if (lastReminder && Date.now() - Date.parse(lastReminder.created_at) < THREE_DAYS_MS) {
+                console.log(`ℹ️  Issue #${issue.number} sudah diingatkan kurang dari 3 hari lalu — dilewati.`);
+                continue;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: [
+                  '⏰ **Pengingat otomatis**',
+                  '',
+                  `Issue ini sudah terbuka **${days} hari**. Jangan biarkan berlama-lama:`,
+                  '',
+                  '1. Baca komentar "🔍 Ringkasan diagnosa awal" di atas untuk melihat step yang gagal.',
+                  '2. Buka log run pada body issue, cari aset/endpoint yang bermasalah.',
+                  '3. Sudah diperbaiki? Trigger ulang workflow *Refresh GitSkins Assets* secara manual — run sukses akan menutup issue ini otomatis.',
+                  '4. Belum sempat? Alihkan profil ke fallback lokal sekarang juga: `npm run assets:swap`.',
+                  '',
+                  '> Panduan lengkap: `docs/playbook-darurat.md`.',
+                ].join('\n'),
+              });
+              reminded++;
+              console.log(`⏰ Pengingat dikirim untuk issue #${issue.number} (${days} hari).`);
+            }
+            core.setOutput('reminded', String(reminded));
+            console.log(`📊 ${reminded}/${candidates.length} issue diingatkan.`);
+
+      - name: Kirim notifikasi (Discord / Telegram) — pengingat issue lama
+        # Hanya terkirim bila ada issue yang benar-benar diingatkan pada run ini,
+        # dan bila minimal satu kanal notifikasi dikonfigurasi.
+        if: steps.remind_issue.outputs.reminded != '0' && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('⏰ Issue ⚠️ Widget GitSkins gagal dimuat sudah terbuka lebih dari 3 hari · Lihat {0}/{1}/issues', github.server_url, github.repository) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}

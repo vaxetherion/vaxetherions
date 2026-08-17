@@ -1,0 +1,51 @@
+# .github/workflows/pr-validation.yml
+# Validasi pull request sebelum merge:
+#   1) lint seluruh workflow + composite action dengan actionlint
+#      (static checker resmi untuk GitHub Actions — mendeteksi kesalahan
+#      sintaks, ekspresi `if`, `uses`, permissions, dsb.)
+#   2) jalankan suite tes penuh `npm test`:
+#      unduh aset → validasi integritas lokal → integritas README →
+#      ketersediaan 10 endpoint API GitSkins live
+#
+# Trigger : setiap pull request + setiap push ke branch selain main.
+#           (main sudah di-cover oleh workflow refresh-assets.yml.)
+
+name: PR Validation
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repositori
+        uses: actions/checkout@v4
+
+      - name: Lint workflow YAML (actionlint)
+        # Skrip bersama (scripts/lint-workflows.sh) — juga dipakai `npm test`
+        # lokal; binary actionlint diunduh otomatis ke cache proyek.
+        run: npm run lint
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Pasang dependensi (npm ci)
+        run: npm ci
+
+      - name: Jalankan suite tes penuh
+        run: npm test
