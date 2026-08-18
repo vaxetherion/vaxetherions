@@ -16,11 +16,14 @@
 <div align="center">
   <img src="https://www.gitskins.com/api/readme-reference/hero?username=vaxetherion&theme=neon" alt="Hero Neon Aetherion" width="860" />
   <br />
-  <a href="https://github.com/vaxetherion/vaxetherion/actions/workflows/refresh-assets.yml" rel="noopener noreferrer">
-    <img src="https://github.com/vaxetherion/vaxetherion/actions/workflows/refresh-assets.yml/badge.svg" alt="Status Workflow: Refresh GitSkins Assets" />
+  <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/refresh-assets.yml" rel="noopener noreferrer">
+    <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/refresh-assets.yml/badge.svg" alt="Status Workflow: Refresh GitSkins Assets" />
   </a>
-  <a href="https://github.com/vaxetherion/vaxetherion/actions/workflows/remind-issue.yml" rel="noopener noreferrer">
-    <img src="https://github.com/vaxetherion/vaxetherion/actions/workflows/remind-issue.yml/badge.svg" alt="Status Workflow: Remind Open GitSkins Issue" />
+  <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/remind-issue.yml" rel="noopener noreferrer">
+    <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/remind-issue.yml/badge.svg" alt="Status Workflow: Remind Open GitSkins Issue" />
+  </a>
+  <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/badges-check.yml" rel="noopener noreferrer">
+    <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/badges-check.yml/badge.svg" alt="Status Workflow: Check Workflow Badges" />
   </a>
 </div>
 
@@ -53,7 +56,8 @@ Profil ini dijaga otomatis oleh tiga komponen yang saling melengkapi:
 | :--- | :--- | :--- |
 | **`refresh-assets.yml`** | Mingguan (Senin 03:00 UTC) + manual + saat `scripts/` berubah | Unduh & optimasi aset GitSkins, validasi E2E (API + fallback lokal), commit aset baru, buka/tutup issue otomatis, label `bug` + `automation`, assign, notifikasi, & peringatan durasi run > 10 menit |
 | **`remind-issue.yml`** | Harian (06:00 UTC) | Pengingat otomatis bila issue *⚠️ Widget GitSkins gagal dimuat* terbuka > 3 hari |
-| **`notify`** (composite action) | Dipanggil kedua workflow di atas | Kirim notifikasi ke **Discord** dan/atau **Telegram** sesuai secret yang terisi |
+| **`badges-check.yml`** | Mingguan (Rabu 05:00 UTC) + manual | Periksa badge workflow & badge pihak ketiga di README (`npm run badges:check`); buka/komentari issue otomatis *⚠️ Badge workflow di README bermasalah* bila ada yang rusak, tutup bila pulih, notifikasi Discord/Telegram |
+| **`notify`** (composite action) | Dipanggil ketiga workflow di atas | Kirim notifikasi ke **Discord** dan/atau **Telegram** sesuai secret yang terisi |
 
 > 🚨 Terjadi insiden? Ikuti panduan darurat langkah demi langkah di
 > [docs/playbook-darurat.md](docs/playbook-darurat.md) — termasuk cara rollback
@@ -64,6 +68,22 @@ Profil ini dijaga otomatis oleh tiga komponen yang saling melengkapi:
 ## 📜 Changelog Otomasi
 
 Evolusi otomasi profil dicatat di sini agar setiap perubahan bisa ditelusuri.
+
+### v1.1.1 — 18 Agustus 2026
+
+- **Perbaikan badge workflow**: URL badge di header README memakai nama repo
+  yang benar (`vaxetherion/vaxetherions`, bukan `vaxetherion/vaxetherion`)
+  sehingga kedua badge (Refresh & Remind) tidak lagi gagal dimuat (HTTP 404).
+  Referensi nama repo di `docs/` dan `scripts/enable-branch-protection.sh`
+  ikut disinkronkan; suite E2E kini memvalidasi badge workflow tetap dimuat
+  (HTTP 200 + Content-Type gambar) agar kesalahan serupa terdeteksi lebih awal.
+- **Validasi lintas repo** (`scripts/check-badges.js` / `npm run badges:check`):
+  periksa badge workflow di README banyak repo sekaligus — nama repo di URL
+  badge dicocokkan dengan nama aktual dari API GitHub, lalu badge dicek benar
+  dimuat (termasuk badge pihak ketiga: shields.io, Codecov, badgen.net).
+  Dijadwalkan mingguan oleh workflow `badges-check.yml` (Rabu 05:00 UTC) dengan
+  laporan issue otomatis + notifikasi Discord/Telegram; dipakai juga sebagai
+  acuan diagnosa di playbook darurat.
 
 ### v1.1.0 — 18 Agustus 2026
 
