@@ -8,6 +8,8 @@
     "assets": "node scripts/download-assets.js",
     "assets:swap": "node scripts/download-assets.js --swap",
     "assets:restore": "node scripts/download-assets.js --restore",
+    "badges:gen": "node scripts/generate-badges.js",
+    "badges:check": "node scripts/check-badges.js",
     "test": "npm run assets && node scripts/validate-assets.js && npm run lint && playwright test",
     "lint": "bash scripts/lint-workflows.sh",
     "clean": "bash scripts/clean-and-compress.sh",
