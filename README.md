@@ -16,6 +16,7 @@
 <div align="center">
   <img src="https://www.gitskins.com/api/readme-reference/hero?username=vaxetherion&theme=neon" alt="Hero Neon Aetherion" width="860" />
   <br />
+<!-- BEGIN:BADGES -->
   <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/refresh-assets.yml" rel="noopener noreferrer">
     <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/refresh-assets.yml/badge.svg" alt="Status Workflow: Refresh GitSkins Assets" />
   </a>
@@ -25,6 +26,17 @@
   <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/badges-check.yml" rel="noopener noreferrer">
     <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/badges-check.yml/badge.svg" alt="Status Workflow: Check Workflow Badges" />
   </a>
+  <a href="https://github.com/vaxetherion/vaxetherions/actions/workflows/pr-validation.yml" rel="noopener noreferrer">
+    <img src="https://github.com/vaxetherion/vaxetherions/actions/workflows/pr-validation.yml/badge.svg" alt="Status Workflow: PR Validation" />
+  </a>
+
+  <a href="https://github.com/vaxetherion/vaxetherions/settings/branches" rel="noopener noreferrer">
+    <img src="https://img.shields.io/badge/branch%20protection-active-brightgreen" alt="Branch Protection" />
+  </a>
+  <a href="https://github.com/vaxetherion/vaxetherions/stargazers" rel="noopener noreferrer">
+    <img src="https://img.shields.io/github/stars/vaxetherion/vaxetherions?style=flat&color=yellow" alt="GitHub Stars" />
+  </a>
+<!-- END:BADGES -->
 </div>
 
 <div align="center">
@@ -50,14 +62,15 @@
 
 ## 🩺 Status & Otomasi
 
-Profil ini dijaga otomatis oleh tiga komponen yang saling melengkapi:
+Profil ini dijaga otomatis oleh empat komponen yang saling melengkapi:
 
 | Komponen | Jadwal | Tugas utama |
 | :--- | :--- | :--- |
 | **`refresh-assets.yml`** | Mingguan (Senin 03:00 UTC) + manual + saat `scripts/` berubah | Unduh & optimasi aset GitSkins, validasi E2E (API + fallback lokal), commit aset baru, buka/tutup issue otomatis, label `bug` + `automation`, assign, notifikasi, & peringatan durasi run > 10 menit |
 | **`remind-issue.yml`** | Harian (06:00 UTC) | Pengingat otomatis bila issue *⚠️ Widget GitSkins gagal dimuat* terbuka > 3 hari |
 | **`badges-check.yml`** | Mingguan (Rabu 05:00 UTC) + manual | Periksa badge workflow & badge pihak ketiga di README (`npm run badges:check`); buka/komentari issue otomatis *⚠️ Badge workflow di README bermasalah* bila ada yang rusak, tutup bila pulih, notifikasi Discord/Telegram |
-| **`notify`** (composite action) | Dipanggil ketiga workflow di atas | Kirim notifikasi ke **Discord** dan/atau **Telegram** sesuai secret yang terisi |
+| **`pr-validation.yml`** | Setiap pull request + push ke branch selain main | Lint actionlint + suite tes penuh (`npm test`) sebelum merge |
+| **`notify`** (composite action) | Dipanggil keempat workflow di atas | Kirim notifikasi ke **Discord** dan/atau **Telegram** sesuai secret yang terisi |
 
 > 🚨 Terjadi insiden? Ikuti panduan darurat langkah demi langkah di
 > [docs/playbook-darurat.md](docs/playbook-darurat.md) — termasuk cara rollback
