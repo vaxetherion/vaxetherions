@@ -1,0 +1,214 @@
+# .github/workflows/badges-check.yml
+# Workflow mingguan: periksa badge di README (npm run badges:check) dan
+# laporkan hasilnya ke issue otomatis.
+#
+# Jadwal : setiap Rabu 05:00 UTC, plus trigger manual (workflow_dispatch)
+#          dengan input opsional daftar repo.
+# Tugas  : 1) jalankan scripts/check-badges.js pada repo ini (default) atau
+#             daftar repo dari input `repos`
+#          2) bila ada masalah → buka / perbarui issue otomatis
+#             "⚠️ Badge workflow di README bermasalah" (label bug+automation,
+#             assign ke pemilik repo, notifikasi Discord/Telegram)
+#          3) bila pemeriksaan sukses → tutup issue serupa yang masih terbuka
+#
+# Catatan: step pemeriksaan TIDAK membuat job gagal (status diekspos lewat
+#          output), sehingga issue bisa dibuka/ditutup dalam alur yang sama
+#          tanpa menunggu run berikutnya.
+
+name: Check Workflow Badges
+
+on:
+  schedule:
+    - cron: '0 5 * * 3'
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: 'Daftar repo owner/repo dipisah koma. Kosong = repo ini.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gitskins-badges-check
+  cancel-in-progress: false
+
+jobs:
+  check-badges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repositori
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Skrip hanya memakai Node bawaan (tanpa dependensi npm), jadi npm ci
+      # tidak diperlukan.
+      - name: Periksa badge workflow & badge pihak ketiga
+        id: check_badges
+        env:
+          BADGE_CHECK_REPOS: ${{ vars.BADGE_CHECK_REPOS || github.event.inputs.repos }}
+        run: |
+          set +e
+          npm run badges:check 2>&1 | tee "$RUNNER_TEMP/badges-check.log"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=broken" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Buka / perbarui issue otomatis jika badge bermasalah
+        id: buka_issue
+        if: steps.check_badges.outputs.status == 'broken'
+        uses: actions/github-script@v7
+        env:
+          # Log pemeriksaan diteruskan lewat env (bukan input github-script)
+          # agar lolos lint actionlint.
+          BADGES_LOG: ${{ runner.temp }}/badges-check.log
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { owner, repo } = context.repo;
+            const title = '⚠️ Badge workflow di README bermasalah';
+            const log = fs.existsSync(process.env.BADGES_LOG)
+              ? fs.readFileSync(process.env.BADGES_LOG, 'utf8').slice(0, 6000)
+              : '(log tidak tersedia)';
+            const body = [
+              'Satu atau lebih badge di README tidak konsisten dengan nama repo aktual atau gagal dimuat.',
+              '',
+              '**Ringkasan pemeriksaan (`npm run badges:check`):**',
+              '```',
+              log,
+              '```',
+              '',
+              '**Langkah perbaikan:**',
+              '1. Jalankan `npm run badges:check` lokal untuk melihat badge mana yang bermasalah.',
+              '2. Perbaiki URL badge di README agar memakai nama repo aktual (atau endpoint yang benar).',
+              '3. Trigger ulang workflow *Check Workflow Badges* — run sukses menutup issue ini otomatis.',
+            ].join('\n');
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+            });
+            const existing = issues.find((issue) => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.setOutput('created', 'false');
+              console.log('ℹ️ Issue serupa sudah terbuka — komentar pembaruan ditambahkan.');
+              return;
+            }
+
+            const issue = await github.rest.issues.create({ owner, repo, title, body });
+            core.setOutput('created', 'true');
+
+            async function ensureLabel(name, color) {
+              try {
+                await github.rest.repos.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.repos.createLabel({ owner, repo, name, color });
+                } else {
+                  throw error;
+                }
+              }
+            }
+            for (const [name, color] of [['bug', 'd73a4a'], ['automation', '5319e7']]) {
+              await ensureLabel(name, color);
+            }
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.data.number,
+              labels: ['bug', 'automation'],
+            });
+            console.log('🏷️  Label "bug" + "automation" ditambahkan ke issue.');
+
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: issue.data.number,
+                assignees: [owner],
+              });
+              console.log(`👤 Issue di-assign ke @${owner}.`);
+            } catch (error) {
+              console.log(`⚠️ Gagal assign issue ke @${owner}: ${error.message}`);
+            }
+            console.log('✅ Issue otomatis dibuat + label + assign.');
+
+      - name: Kirim notifikasi (Discord / Telegram) — badge bermasalah
+        if: steps.buka_issue.outputs.created == 'true' && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('🚨 Badge workflow di README bermasalah — issue otomatis dibuat · {0}/{1}/issues', github.server_url, github.repository) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Tutup issue otomatis jika pemeriksaan sukses
+        id: tutup_issue
+        if: steps.check_badges.outputs.status == 'ok'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = '⚠️ Badge workflow di README bermasalah';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+            });
+            const open = issues.filter((issue) => issue.title === title && !issue.pull_request);
+            if (open.length === 0) {
+              console.log('ℹ️ Tidak ada issue terbuka dengan judul tersebut — tidak ada yang perlu ditutup.');
+              core.setOutput('closed_count', '0');
+              return;
+            }
+            for (const issue of open) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: '✅ **Pemeriksaan badge terbaru sukses** — semua badge konsisten dengan remote aktual dan berhasil dimuat. Issue ditutup otomatis.',
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
+            core.setOutput('closed_count', String(open.length));
+            console.log(`✅ ${open.length} issue ditutup otomatis.`);
+
+      - name: Kirim notifikasi (Discord / Telegram) — badge pulih
+        if: steps.tutup_issue.outputs.closed_count != '0' && (env.DISCORD_WEBHOOK_URL != '' || (env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''))
+        uses: ./.github/actions/notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        with:
+          message: ${{ format('✅ Badge workflow di README pulih — issue ditutup otomatis · {0}/{1}/issues', github.server_url, github.repository) }}
+          discord_webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
