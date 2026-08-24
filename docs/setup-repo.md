@@ -14,7 +14,7 @@ Aetherion, berlaku untuk siapa pun yang memegang repo.
 | Node.js | 20 | `node --version` — wajib 18+ (fetch global) |
 | npm | 9+ | ikut terpasang bersama Node |
 | gh CLI (opsional) | ≥ 2.40 | hanya untuk `scripts/enable-branch-protection.sh` |
-| Akun GitHub | — | repo `vaxetherion/vaxetherion` (profil) |
+| Akun GitHub | — | repo `vaxetherion/vaxetherions` (profil) |
 
 ---
 
@@ -33,7 +33,9 @@ npm test
 
 > ℹ️ `npm test` mengunduh 10 aset GitSkins ke `./assets/`, memvalidasi
 > integritasnya, melint workflow dengan actionlint, lalu menjalankan suite E2E
-> (integritas README, fallback lokal, dan 10 endpoint API live).
+> (integritas README, fallback lokal, **konsistensi nama repo pada badge
+> workflow vs remote aktual**, dan pemuatan semua gambar eksternal: aset
+> GitSkins + badge workflow GitHub).
 
 ---
 
@@ -91,7 +93,7 @@ git log --oneline && npm test
 
 ```bash
 # 1) Tambahkan remote (ganti URL bila username/org lain)
-git remote add origin git@github.com:vaxetherion/vaxetherion.git
+git remote add origin git@github.com:vaxetherion/vaxetherions.git
 
 # 2) Push pertama
 git push -u origin main
@@ -156,6 +158,12 @@ to pass before merging* → pilih **PR Validation** → *Create*.
   lalu `npm run assets` dan commit.
 - **Saat mengubah workflow** — jalankan `npm run lint` + `npm test` lokal;
   PR Validation di GitHub akan mengonfirmasi.
+- **Saat repo dipindah/rename di organisasi** — jalankan `npm run badges:check`
+  (atau `npm run badges:check -- owner/a owner/b ...` untuk banyak repo
+  sekaligus) agar badge workflow di README konsisten dengan nama repo aktual;
+  suite E2E (*Konsistensi nama repo pada badge workflow*) ikut menjaganya.
+  Penjadwalan otomatis: workflow `badges-check.yml` (Rabu 05:00 UTC) yang
+  membuka/menutup issue otomatis bila ada badge rusak.
 
 ---
 

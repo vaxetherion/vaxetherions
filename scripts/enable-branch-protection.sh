@@ -24,7 +24,7 @@ if [ -z "$REPO" ]; then
   REPO="$(git remote get-url origin 2>/dev/null || true)"
   REPO="$(printf '%s' "$REPO" | sed -E 's#.*github.com[:/]([^/]+/[^/]+)(\.git)?$#\1#')"
 fi
-REPO="${REPO:-vaxetherion/vaxetherion}"
+REPO="${REPO:-vaxetherion/vaxetherions}"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "❌ gh CLI tidak terpasang. Install: https://cli.github.com" >&2

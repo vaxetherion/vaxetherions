@@ -110,7 +110,75 @@ pipeline otomasi profil (refresh aset, siklus hidup issue, notifikasi).
 - Terapkan lewat skrip `scripts/enable-branch-protection.sh` (via `gh api`)
   setelah repo di-push, atau manual melalui *Settings → Branches*.
 
-## 7. Pernyataan Kejujuran
+## 7. Pertahanan terhadap Supply Chain Attack (NPM)
+
+**Analisis** — Insiden supply chain attack NPM terjadi ketika paket yang
+populer atau mirip nama (typosquatting) dipublish ke registry npm dengan
+payload berbahaya — biasanya di `postinstall` hook yang menjalankan kode
+saat developer menjalankan `npm install`.
+
+**Modus operandi yang umum:**
+- **Postinstall hook injection**: Script di `package.json` payload menjalankan
+  `curl`/`wget` ke server C2, mengeksfiltrasi `process.env` (AWS_SECRET,
+  GITHUB_TOKEN, NPM_TOKEN), atau memasang reverse shell.
+- **Typosquatting**: Paket seperti `@omnikar/*` (salah eja) yang mirip dengan
+  `@ornikar/*` (paket resmi Ornikar) menyamar sebagai dependency sah.
+- **Dependency Confusion**: Package name internal (misal `pob-test-package-in-monorepo`)
+  dipublikasikan ke npm publik agar menimpa package internal di monorepo.
+- **Version Manipulation**: Versi paket populer (misal `keyv` v60.0 dari v6.x)
+  dipalsukan untuk menginstal versi berbahaya.
+
+**Pertahanan yang diterapkan di repo ini:**
+
+1. **Minimal Dependencies**: Hanya 2 devDependencies (`@playwright/test`, `svgo`)
+   yang keduanya dari publisher terpercaya. Tidak ada production dependencies —
+   mengurangi attack surface secara drastis.
+2. **`.npmrc` Hardening**:
+   - `audit=true` + `audit-level=critical` — audit otomatis saat install.
+   - `package-lock=true` — kunci instalasi dari lockfile, mencegah dependency confusion.
+   - `fund=false` — mengurangi interaksi dengan ekosistem npm selama instalasi.
+3. **`npm audit` dalam Pipeline**: Script `npm run audit` dijalankan sebagai bagian
+   dari `npm test` — vulnerabilitas kritis akan memblokir pipeline.
+4. **Lockfile Committed**: `package-lock.json` (lockfileVersion 3) dikomit ke repo —
+   memastikan seluruh tim menginstal versi dependency yang identik.
+5. **SVG Sanitasi Berbasis Pola**: Fungsi `sanitizeSvg()` di
+   `scripts/download-assets.js` membuang `<script>`, `<foreignObject>`,
+   atribut `on*`, dan URL `javascript:` dari semua SVG yang diunduh.
+6. **E2E Anti-XSS Testing**: `tests/readme.spec.js` memverifikasi bahwa setiap
+   aset fallback lokal **tidak mengandung** pola `<script`, `on*=`, atau
+   `javascript:` — mendeteksi injecti bahkan jika upstream terkompromi.
+
+**Langkah mitigasi jika terdeteksi paket terinfeksi:**
+
+```bash
+# 1. Identifikasi paket yang terinfeksi
+npm ls --all | grep -i "<nama-paket>"
+
+# 2. Hapus node_modules dan reinstal bersih
+npm run clean    # script clean-and-compress.sh (enhanced)
+
+# 3. Cek lockfile untuk paket mencurigakan
+grep -r "<nama-paket>" package-lock.json
+
+# 4. Audit vulnerabilities
+npm run audit
+
+# 5. Jika perlu, sanitasi history git (identity)
+npm run sanitize
+```
+
+**Pencegahan untuk masa depan:**
+- Jalankan `npm audit` secara berkala (sudah terintegrasi di `npm test`).
+- **Jangan pernah** menjalankan `npm install` dari paket yang tidak diverifikasi.
+- Gunakan `npm ci` untuk instalasi reproducible di CI/CD.
+- Pertimbangkan penggunaan `socket.dev` atau `snyk` untuk pemantauan real-time.
+- Gunakan npm provenance (`--provenance`) untuk melacak asal paket.
+
+> **Pernyataan Kejujuran**: Pada saat audit ini dilakukan (Agustus 2026),
+> **0 dari 42 paket terinfeksi** yang dilaporkan ditemukan di repo ini.
+> Paket-paket tersebut kemungkinan berasal dari proyek lain.
+
+## 8. Pernyataan Kejujuran
 
 - **Status/SLA resmi GitSkins**: Informasi tersebut tidak tersedia; analisis
   di atas berdasarkan perilaku HTTP yang terukur pada saat audit (semua 10

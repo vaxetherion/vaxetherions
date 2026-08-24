@@ -76,7 +76,7 @@ Issue muncul?
 ## 3. Langkah 1 — Kenali & verifikasi
 
 1. **Baca body issue.** Workflow otomatis menyertakan tautan langsung ke log run:
-   `Log: https://github.com/vaxetherion/vaxetherion/actions/runs/<RUN_ID>`.
+   `Log: https://github.com/vaxetherion/vaxetherions/actions/runs/<RUN_ID>`.
 2. **Baca komentar pertama issue** — berjudul *"🔍 Ringkasan diagnosa awal (otomatis)"*.
    Komentar ini sudah menyebutkan **step mana yang gagal** (mis. `e2e_validate`
    atau `validate_local_assets`), jadi kamu tidak perlu membuka log untuk tahu
@@ -99,6 +99,13 @@ Issue muncul?
 > - **HTTP 5xx / timeout** → kemungkinan API GitSkins sedang down/lam. *Tunggu + fallback.*
 > - **HTTP 404 / Content-Type bukan gambar** → endpoint atau parameter berubah. *Perbaiki manifest.*
 > - **"Respons bukan dokumen SVG"** → endpoint mengembalikan HTML/error page. *Perbaiki manifest atau tunggu.*
+> - **Badge workflow 404 / nama repo salah** → URL badge memakai nama repo yang
+>   tidak cocok dengan remote aktual (mis. `vaxetherion/vaxetherion` vs
+>   `vaxetherions`). Terdeteksi otomatis oleh suite E2E *"Konsistensi nama repo
+>   pada badge workflow"* atau `npm run badges:check`. Workflow mingguan
+>   `badges-check.yml` membuka issue otomatis *⚠️ Badge workflow di README
+>   bermasalah* (label `bug` + `automation`) bila ada badge rusak. *Perbaiki URL
+>   di README.*
 
 ---
 
@@ -156,6 +163,14 @@ curl -sS -o /dev/null -w "%{http_code} %{content_type}\n" \
 - **HTTP 4xx/5xx atau `text/html`** → endpoint berubah / sedang bermasalah.
   Buka URL-nya di browser untuk memastikan tampilannya (mungkin parameter baru
   seperti `v=`, `style=`, atau `mode=` yang dibutuhkan).
+
+> 💡 Jika kegagalan berasal dari **badge** (bukan aset GitSkins) — mis. pesan
+> tes *"Nama repo badge … cocok dengan remote aktual"* atau *"HTTP 200 +
+> Content-Type gambar: badge: …"* — masalahnya hampir pasti nama repo di URL
+> badge (atau endpoint penyedia badge yang berubah). Jalankan
+> `npm run badges:check` untuk melihat daftar badge yang bermasalah beserta
+> nama repo aktual yang benar; workflow `badges-check.yml` membuka issue
+> otomatis bila ditemukan.
 
 ---
 
@@ -290,6 +305,7 @@ Selain alur darurat di atas, workflow harian **`remind-issue.yml`** (setiap hari
 | Kembalikan README ke URL GitSkins live | `npm run assets:restore` |
 | Validasi penuh (unduh + integritas lokal + API + README) | `npm test` |
 | Cek integritas aset lokal saja (kosong/korup) | `node scripts/validate-assets.js` |
+| Cek badge workflow & badge pihak ketiga vs remote aktual (repo ini / banyak repo) | `npm run badges:check` / `npm run badges:check -- owner/a owner/b` |
 | Lint workflow GitHub Actions (actionlint) | `npm run lint` |
 | Cek satu endpoint langsung | `curl -sS -o /dev/null -w "%{http_code} %{content_type}\n" "<URL>"` |
 | Bersihkan aset & kompres ulang | `npm run clean` |
@@ -314,6 +330,12 @@ npm run assets:swap  →  git add README.md  →  git commit  →  git push
    agar fallback lokal ikut memakai format baru.
 5. **Catat kejadian** (tanggal, penyebab, solusi) di issue yang ditutup — ini jadi
    basis data insiden untuk diagnosis berikutnya.
+6. **Jaga nama repo pada badge workflow** — suite E2E *"Konsistensi nama repo
+   pada badge workflow"* dan `npm run badges:check` memastikan URL badge selalu
+   memakai nama repo aktual; jalankan keduanya saat repo dipindah/rename.
+   Workflow mingguan `badges-check.yml` (Rabu 05:00 UTC) otomatis membuka issue
+   bila ada badge yang rusak dan menutupnya saat pulih — jangan biarkan issue
+   itu terbuka terlalu lama.
 
 ---
 

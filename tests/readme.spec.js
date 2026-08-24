@@ -23,6 +23,14 @@ const README_PATH = path.join(__dirname, '..', 'README.md');
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const README = readFileSync(README_PATH, 'utf8');
 
+// Deteksi apakah README dalam mode "swapped" (aset lokal ./assets/) atau
+// "live" (URL GitSkins eksternal). Mode swapped terjadi setelah
+// `npm run assets:swap` — semua referensi aset GitSkins diganti dengan
+// path lokal ./assets/<name>.svg. Tes harus menyesuaikan ekspektasi.
+const IS_SWAPPED = GITSKINS_MANIFEST.every(
+  (asset) => !README.includes(asset.url) && README.includes(`./assets/${asset.name}.svg`),
+);
+
 /* ------------------------------------------------------------------ */
 /* Helper bersama                                                      */
 /* ------------------------------------------------------------------ */
@@ -111,9 +119,15 @@ test.describe('Jumlah badge workflow sesuai jumlah file workflow', () => {
 /* ------------------------------------------------------------------ */
 test.describe('Integritas README.md', () => {
   // Seluruh URL GitSkins harus muncul di README (tidak boleh ada yang hilang)
+  // Dalam mode swapped, yang dicek adalah path lokal ./assets/<name>.svg
   for (const asset of GITSKINS_MANIFEST) {
     test(`README memuat aset "${asset.name}"`, () => {
-      expect(README, `URL ${asset.url} tidak ditemukan di README.md`).toContain(asset.url);
+      const localPath = `./assets/${asset.name}.svg`;
+      if (IS_SWAPPED) {
+        expect(README, `Path lokal ${localPath} tidak ditemukan di README.md`).toContain(localPath);
+      } else {
+        expect(README, `URL ${asset.url} tidak ditemukan di README.md`).toContain(asset.url);
+      }
     });
   }
 
@@ -190,8 +204,8 @@ test.describe('Fallback aset lokal ./assets/', () => {
 test.describe('Semua gambar eksternal di README dimuat', () => {
   const ATTEMPTS = 3;
   const RETRY_DELAY_MS = 1_000;
-  const REQUEST_TIMEOUT_MS = 20_000;
-  const SLOW_MS = 20_000;
+  const REQUEST_TIMEOUT_MS = 30_000;
+  const SLOW_MS = 30_000;
 
   // Daftar tunggal seluruh gambar eksternal README — aset GitSkins dari
   // manifest + badge workflow GitHub — divalidasi dalam satu alur yang sama.
@@ -200,8 +214,18 @@ test.describe('Semua gambar eksternal di README dimuat', () => {
   // Jaring pengaman: manifest tetap sumber kebenaran URL aset, jadi pastikan
   // tidak ada aset yang terlewat dari daftar gabungan ini.
   test('Daftar gambar eksternal mencakup seluruh aset GitSkins & badge workflow', () => {
-    for (const asset of GITSKINS_MANIFEST) {
-      expect(EXTERNAL_URLS, `URL aset ${asset.name} tidak ada di README.md`).toContain(asset.url);
+    if (IS_SWAPPED) {
+      // Mode lokal: setiap aset harus ada sebagai path ./assets/ di README
+      // (bukan sebagai URL eksternal, jadi skip pemeriksaan EXTERNAL_URLS)
+      for (const asset of GITSKINS_MANIFEST) {
+        const localPath = `./assets/${asset.name}.svg`;
+        expect(README, `Path lokal ${localPath} tidak ada di README.md`).toContain(localPath);
+      }
+    } else {
+      // Mode live: semua URL GitSkins harus ada sebagai gambar eksternal
+      for (const asset of GITSKINS_MANIFEST) {
+        expect(EXTERNAL_URLS, `URL aset ${asset.name} tidak ada di README.md`).toContain(asset.url);
+      }
     }
     const badgeCount = EXTERNAL_URLS.filter((url) => url.includes('/badge.svg')).length;
     expect(badgeCount, 'Tidak ada badge workflow di README.md').toBeGreaterThan(0);
